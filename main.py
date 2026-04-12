@@ -1,55 +1,43 @@
 import httpx
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="The Watcher API")
+app = FastAPI(title="The Watcher - Archive Engine")
 
 @app.get("/api/get_stream")
-async def get_stream(tmdb_id: str, season: int = 1, episode: int = 1):
-    # Added flush=True so this shows up in Render logs instantly!
-    print(f"🎬 Mobile app requested stream for TMDB ID: {tmdb_id}", flush=True)
+async def get_stream(archive_id: str):
+    # For testing, you can use: 'night_of_the-living-dead' or 'TheGeneral'
+    print(f"🎬 Requesting Public Domain movie: {archive_id}", flush=True)
     
     try:
-        # =================================================================
-        # THE AGGREGATOR TARGET
-        # You will replace this base URL with whatever public API you find
-        # =================================================================
-        # Example for a Movie:
-        aggregator_url = f"https://api.example-indexer.com/movie/{tmdb_id}"
+        # The Internet Archive Metadata API
+        url = f"https://archive.org/metadata/{archive_id}"
         
-        # If it was a TV show, your logic might switch to this:
-        # aggregator_url = f"https://api.example-indexer.com/tv/{tmdb_id}/{season}/{episode}"
-
-        print(f"🔍 Searching aggregator: {aggregator_url}", flush=True)
-
-        # We use an async client so your server stays lightning fast
         async with httpx.AsyncClient() as client:
-            # We send a request to the aggregator API
-            response = await client.get(aggregator_url)
+            response = await client.get(url)
+            if response.status_code != 200:
+                return {"status": "error", "message": "Movie not found in Archive"}
             
-            # If the aggregator responds successfully...
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Every API formats their JSON differently. 
-                # You might need to change 'stream_url' to match whatever the API calls it!
-                if "stream_url" in data:
-                    real_video_url = data["stream_url"]
-                    print(f"✅ Found stream! Sending to app...", flush=True)
-                    
-                    return {
-                        "status": "success",
-                        "tmdb_id": tmdb_id,
-                        "stream_url": real_video_url
-                    }
-            
-            # If the API didn't have the movie or failed
-            print(f"❌ Stream not found on aggregator.", flush=True)
-            return {"status": "error", "message": "Stream not found"}
-            
-    except Exception as e:
-        print(f"🔥 Server crash: {str(e)}", flush=True)
-        raise HTTPException(status_code=500, detail=str(e))
+            data = response.json()
+            server = data.get("server")
+            dir = data.get("dir")
+            files = data.get("files", [])
 
-@app.get("/")
-async def root():
-    return {"message": "The Watcher API is running!"}
+            # We search for the first high-quality .mp4 file
+            video_file = next((f["name"] for f in files if f["name"].endswith(".mp4")), None)
+
+            if video_file:
+                # Construct the direct streaming URL
+                real_video_url = f"https://{server}{dir}/{video_file}"
+                print(f"✅ Found real file: {real_video_url}", flush=True)
+                
+                return {
+                    "status": "success",
+                    "movie": archive_id,
+                    "stream_url": real_video_url
+                }
+            
+            return {"status": "error", "message": "No playable video found"}
+
+    except Exception as e:
+        print(f"🔥 Error: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
