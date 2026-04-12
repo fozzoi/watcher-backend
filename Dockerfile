@@ -1,40 +1,28 @@
-# Use a lightweight Python image
+# Use a slim Python image
 FROM python:3.11-slim
-
-# Install system dependencies for Playwright
-RUN apt-get update && apt-get install -y \
-    libglib2.0-0 \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    librandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install
+# Install basic system tools
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
+# --- THE MAGIC PART ---
+# 1. Install Playwright's Chromium browser
 RUN playwright install chromium
+# 2. Tell Playwright to install all the Linux libraries Chromium needs
+# This replaces that giant manual list and avoids "package not found" errors
 RUN playwright install-deps chromium
 
-# Copy the rest of the code
+# Copy the rest of your backend code
 COPY . .
 
-# Start the server
+# Start the server (Port 10000 is Render's default for Docker)
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
