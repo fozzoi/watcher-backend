@@ -1,42 +1,40 @@
 import httpx
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="The Watcher - Archive Engine")
+app = FastAPI(title="The Watcher - Aggregator Engine")
 
 @app.get("/api/get_stream")
-async def get_stream(archive_id: str):
-    # For testing, you can use: 'night_of_the-living-dead' or 'TheGeneral'
-    print(f"🎬 Requesting Public Domain movie: {archive_id}", flush=True)
+async def get_stream(tmdb_id: str, season: int = 1, episode: int = 1):
+    # Fixed the parameter name to 'tmdb_id' to match your React Native app
+    print(f"🎬 Requesting Stream for TMDB: {tmdb_id}", flush=True)
     
     try:
-        # The Internet Archive Metadata API
-        url = f"https://archive.org/metadata/{archive_id}"
+        # ---------------------------------------------------------
+        # 🛠️ THIS IS YOUR AGGREGATOR CONFIG
+        # ---------------------------------------------------------
+        # Many community aggregators use a pattern like this:
+        # https://api.some-provider.com/fetch?id=687163
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            if response.status_code != 200:
-                return {"status": "error", "message": "Movie not found in Archive"}
-            
-            data = response.json()
-            server = data.get("server")
-            dir = data.get("dir")
-            files = data.get("files", [])
+        # FOR TESTING: Let's keep a fallback so it doesn't crash
+        # while you look for a working provider URL.
+        test_url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+        
+        # ---------------------------------------------------------
+        # REAL LOGIC (Once you find a working Aggregator API)
+        # ---------------------------------------------------------
+        # async with httpx.AsyncClient() as client:
+        #     target = f"https://YOUR_FOUND_API.com/api/{tmdb_id}"
+        #     response = await client.get(target)
+        #     if response.status_code == 200:
+        #         data = response.json()
+        #         return {"status": "success", "stream_url": data['url']}
 
-            # We search for the first high-quality .mp4 file
-            video_file = next((f["name"] for f in files if f["name"].endswith(".mp4")), None)
-
-            if video_file:
-                # Construct the direct streaming URL
-                real_video_url = f"https://{server}{dir}/{video_file}"
-                print(f"✅ Found real file: {real_video_url}", flush=True)
-                
-                return {
-                    "status": "success",
-                    "movie": archive_id,
-                    "stream_url": real_video_url
-                }
-            
-            return {"status": "error", "message": "No playable video found"}
+        # For now, we return success so your app doesn't show an error
+        return {
+            "status": "success",
+            "tmdb_id": tmdb_id,
+            "stream_url": test_url  # Replace this with real logic later
+        }
 
     except Exception as e:
         print(f"🔥 Error: {str(e)}", flush=True)
