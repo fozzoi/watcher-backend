@@ -1,68 +1,72 @@
 const express = require('express');
-const { MOVIES } = require('@consumet/extensions');
+const { META } = require('@consumet/extensions'); // Use the META provider
 const cors = require('cors');
 
 const app = express();
 app.use(cors());
 
-// Initialize the FlixHQ provider (the one Consumet uses for movies/TV)
-const flixhq = new MOVIES.FlixHQ();
+// Initialize the TMDB Meta provider (This is the "Brain" of Consumet)
+const tmdb = new META.TMDB();
 
 app.get('/', (req, res) => {
-    res.send({ status: 'online', message: 'The Watcher Node Engine is Live' });
+    res.send({ status: 'online', message: 'The Watcher Node Meta-Engine is Live' });
 });
 
 app.get('/api/get_stream', async (req, res) => {
     const { tmdb_id, media_type, season, episode } = req.query;
-    console.log(`📡 Requesting: ${media_type} ${tmdb_id}`);
+    console.log(`📡 Requesting Meta-Stream for: ${media_type} ${tmdb_id}`);
 
     try {
-        // 1. Search for the movie on FlixHQ
-        // Note: Consumet search usually works better with the title, 
-        // but we can use the TMDB ID to verify the result.
-        const searchResults = await flixhq.search(tmdb_id); 
+        // 1. Fetch info and links directly using the TMDB ID
+        // The Meta provider handles the searching and mapping for you!
+        let streamData;
         
-        // If TMDB ID search fails, you might need a title-based search fallback
-        if (searchResults.results.length === 0) {
-            throw new Error("No results found on provider");
-        }
-
-        const media = searchResults.results[0];
-        
-        // 2. Get the internal Consumet ID for the specific episode
-        const info = await flixhq.fetchMediaInfo(media.id);
-        
-        let episodeId = media.id;
-        if (media_type === 'tv') {
+        if (media_type === 'movie') {
+            // For movies, we can fetch sources directly using the TMDB ID
+            streamData = await tmdb.fetchEpisodeSources(tmdb_id, tmdb_id);
+        } else {
+            // For TV shows, we need the internal "episode ID"
+            // Step A: Get show info
+            const info = await tmdb.fetchMediaInfo(tmdb_id, media_type === 'tv' ? 'tv' : 'movie');
+            
+            // Step B: Find the specific episode
             const targetEp = info.episodes.find(e => e.season == season && e.number == episode);
-            if (!targetEp) throw new Error("Episode not found");
-            episodeId = targetEp.id;
+            if (!targetEp) throw new Error("Episode not found in Meta database");
+            
+            // Step C: Fetch the stream
+            streamData = await tmdb.fetchEpisodeSources(targetEp.id, tmdb_id);
         }
 
-        // 3. Extract the actual .m3u8 links!
-        const sources = await flixhq.fetchEpisodeSources(episodeId, media.id);
-
-        if (sources.sources && sources.sources.length > 0) {
-            console.log("✅ Found link:", sources.sources[0].url);
+        if (streamData && streamData.sources && streamData.sources.length > 0) {
+            // Find the highest quality (or the first) .m3u8 link
+            const bestSource = streamData.sources.find(s => s.quality === 'auto') || streamData.sources[0];
+            
+            console.log("🎉 SUCCESS! Found direct link:", bestSource.url);
             return res.json({
                 status: 'success',
-                stream_url: sources.sources[0].url,
+                stream_url: bestSource.url,
                 is_m3u8: true
             });
         }
 
-        throw new Error("No sources found");
+        throw new Error("No sources found for this ID");
 
     } catch (error) {
-        console.log("⚠️ Scraper failed, sending fallback:", error.message);
-        // Safety Fallback (Same as before)
+        console.log("⚠️ Meta-Scraper failed, sending fallback:", error.message);
+        
+        // Safety Fallback (Back to the iframe if the Meta-API is down)
         const fallback = media_type === 'movie' 
             ? `https://vidsrc.me/embed/movie?tmdb=${tmdb_id}`
             : `https://vidsrc.me/embed/tv?tmdb=${tmdb_id}&s=${season}&e=${episode}`;
         
-        res.json({ status: 'success', stream_url: fallback, is_m3u8: false });
+        res.json({ 
+            status: 'success', 
+            stream_url: fallback, 
+            is_m3u8: false,
+            error_log: error.message 
+        });
     }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Node Meta-Server running on port ${PORT}`));
