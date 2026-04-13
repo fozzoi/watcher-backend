@@ -1,43 +1,38 @@
-import asyncio
-from fastapi import FastAPI, HTTPException
-from playwright.async_api import async_playwright
+from fastapi import FastAPI
+from fastapi.responses import Response
+from resolver import StreamResolver
 
-app = FastAPI()
+app = FastAPI(title="The Watcher - Docker Scraper Engine")
+resolver = StreamResolver()
 
-@app.get("/api/get_stream")
-async def get_stream(tmdb_id: str):
-    print(f"🚀 Launching browser for ID: {tmdb_id}", flush=True)
-    
-    async with async_playwright() as p:
-        # Launching Chromium with specific flags to save memory
-        browser = await p.chromium.launch(
-            headless=True, 
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-        )
-        page = await browser.new_page()
-
-        try:
-            # 1. Go to the embed site
-            url = f"https://vsembed.ru/embed/movie/{tmdb_id}"
-            print(f"🌐 Navigating to: {url}", flush=True)
-            await page.goto(url, timeout=30000)
-
-            # 2. Wait for the video link to appear in the code
-            # Playwright is smart: it executes the site's JS for us
-            await page.wait_for_selector("video", timeout=15000)
-            
-            # 3. Pull the src from the video tag
-            stream_url = await page.eval_on_selector("video", "el => el.src")
-            
-            print(f"✅ Found Link: {stream_url}", flush=True)
-            return {"status": "success", "stream_url": stream_url, "is_m3u8": True}
-
-        except Exception as e:
-            print(f"❌ Browser Error: {e}", flush=True)
-            return {"status": "error", "message": str(e)}
-        finally:
-            await browser.close()
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(content="", media_type="image/x-icon")
 
 @app.get("/")
 def health():
-    return {"status": "online"}
+    return {"status": "online", "mode": "Docker Scraper"}
+
+@app.get("/api/get_stream")
+async def get_stream(tmdb_id: str, media_type: str = "movie", season: int = 1, episode: int = 1):
+    print(f"🕵️ Scraping link for {media_type.upper()} ID: {tmdb_id}...", flush=True)
+    
+    # 1. Try to magically extract the real link
+    final_link = resolver.resolve(tmdb_id, media_type, season, episode)
+    
+    if final_link:
+        print(f"✅ Extracted Link: {final_link}", flush=True)
+        return {
+            "status": "success",
+            "stream_url": final_link,
+            "is_m3u8": final_link.endswith(".m3u8")
+        }
+    
+    # 2. If the scraper fails (site changed code), use the Iframe Fallback
+    print("⚠️ Scraping failed, engaging iframe fallback...", flush=True)
+    if media_type == "movie":
+        fallback_url = f"https://vidsrc.me/embed/movie?tmdb={tmdb_id}"
+    else:
+        fallback_url = f"https://vidsrc.me/embed/tv?tmdb={tmdb_id}&s={season}&e={episode}"
+        
+    return {"status": "success", "stream_url": fallback_url, "is_m3u8": False}
