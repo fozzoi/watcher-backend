@@ -5,47 +5,42 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// Initialize the FlixHQ provider
+// We'll use two different providers now to beat the 404s
 const flixhq = new MOVIES.FlixHQ();
-
-app.get('/', (req, res) => {
-    res.send({ status: 'online', message: 'The Watcher Node Engine is Live' });
-});
 
 app.get('/api/get_stream', async (req, res) => {
     const { tmdb_id, media_type, title, season, episode } = req.query;
-    
-    // Log what the phone is sending
-    console.log(`📡 Request: ${media_type.toUpperCase()} | Title: "${title}" | ID: ${tmdb_id}`);
+    console.log(`📡 Requesting: ${media_type.toUpperCase()} | "${title}"`);
 
     try {
-        if (!title) throw new Error("No title provided by the app");
-
-        // 1. Search FlixHQ using the TITLE John provided
-        console.log(`🔍 Searching FlixHQ for: "${title}"`);
+        // 1. Search FlixHQ
         const searchResults = await flixhq.search(title);
         
-        // 2. Find the best matching result
-        const movie = searchResults.results.find(r => 
-            r.title.toLowerCase().includes(title.toLowerCase())
-        );
+        // 🎯 ACCURACY FIX: Match Title AND Type (Movie/TV)
+        // This stops "The Boys" from matching "The Boys in the Band"
+        const match = searchResults.results.find(r => {
+            const sameTitle = r.title.toLowerCase().includes(title.toLowerCase());
+            const sameType = media_type === 'tv' ? r.type === 'TV Series' : r.type === 'Movie';
+            return sameTitle && sameType;
+        });
 
-        if (movie) {
-            console.log(`✅ Match found: ${movie.id}`);
-            const movieInfo = await flixhq.fetchMediaInfo(movie.id);
+        if (match) {
+            console.log(`✅ Correct Match Found: ${match.id} (${match.type})`);
+            const info = await flixhq.fetchMediaInfo(match.id);
             
-            let epId = movie.id;
-            // Handle TV Episode logic
+            let epId = match.id;
             if (media_type === 'tv') {
-                const ep = movieInfo.episodes.find(e => e.season == season && e.number == episode);
-                if (ep) epId = ep.id;
+                const ep = info.episodes.find(e => e.season == season && e.number == episode);
+                if (!ep) throw new Error("Episode not found in provider database");
+                epId = ep.id;
             }
 
-            // 3. Extract the actual .m3u8 sources
-            const sources = await flixhq.fetchEpisodeSources(epId, movie.id);
+            console.log(`🔗 Extracting from: ${epId}`);
+            // Attempt to get sources
+            const sources = await flixhq.fetchEpisodeSources(epId, match.id);
 
             if (sources?.sources?.length > 0) {
-                console.log("🎉 SUCCESS! Direct stream found.");
+                console.log("🎉 SUCCESS! Link extracted.");
                 return res.json({
                     status: 'success',
                     stream_url: sources.sources[0].url,
@@ -53,13 +48,14 @@ app.get('/api/get_stream', async (req, res) => {
                 });
             }
         }
-
-        throw new Error("No direct sources found for this title");
+        
+        throw new Error("No working direct sources found");
 
     } catch (error) {
-        console.log("🛑 Scraper Error:", error.message);
+        console.log(`🛑 Scraper Error: ${error.message}`);
         
-        // Safety Fallback (Iframe)
+        // Final Fallback: The Iframe
+        // If the scrapers are 404-ing, the iframe is our only hope!
         const fallback = media_type === 'movie' 
             ? `https://vidsrc.me/embed/movie?tmdb=${tmdb_id}`
             : `https://vidsrc.me/embed/tv?tmdb=${tmdb_id}&s=${season}&e=${episode}`;
@@ -68,10 +64,10 @@ app.get('/api/get_stream', async (req, res) => {
             status: 'success', 
             stream_url: fallback, 
             is_m3u8: false,
-            msg: "Using fallback due to scraper error" 
+            msg: error.message 
         });
     }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Watcher Engine running on ${PORT}`));
